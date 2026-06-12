@@ -1,0 +1,13 @@
+[Unit]
+Description=Ziwei Node.js Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/ziwei-server/node_service
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
