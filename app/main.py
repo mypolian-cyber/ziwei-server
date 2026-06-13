@@ -35,3 +35,7 @@ def startup():
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "ziwei-api"}
+
+@app.get("/api/config")
+def config():
+    return {"beta_mode": os.getenv("BETA_MODE", "false").lower() == "true"}

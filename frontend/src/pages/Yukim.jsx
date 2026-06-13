@@ -1,6 +1,8 @@
 import React, { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import axios from "axios"
+import html2canvas from "html2canvas"
+import jsPDF from "jspdf"
 
 const QUESTION_TYPES = [
   { type:"사업/직업", emoji:"💼", items:["취업/이직","사업 시작","계약/거래","승진/발령","창업"] },
@@ -62,6 +64,11 @@ export default function Yukim() {
   const [error,         setError]         = useState("")
   const [result,        setResult]        = useState(null)
 
+  const [betaMode, setBetaMode] = useState(false)
+
+  React.useEffect(() => {
+    axios.get("/api/config").then(({data}) => setBetaMode(data.beta_mode)).catch(()=>{})
+  }, [])
   const input = JSON.parse(sessionStorage.getItem("ziwei_input") || "{}")
 
   React.useEffect(() => {
@@ -105,6 +112,16 @@ export default function Yukim() {
     setError("")
     setLoading(true)
     try {
+      if (betaMode) {
+        // 베타: 결제 없이 바로 GPT 호출
+        const { data } = await axios.post("/api/yukim/calculate", {
+          ...buildQuestion(), payment_key: "test_skip"
+        })
+        setResult(data)
+        setLoading(false)
+        return
+      }
+
       // 1) 결제 주문 생성
       const { data: order } = await axios.post("/api/payment/order", {
         service_type: "yukim", cache_key: ""
@@ -127,6 +144,38 @@ export default function Yukim() {
     }
   }
 
+  async function handleSavePdf() {
+    const el = document.getElementById("yukim-result-content")
+    if (!el) return
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true })
+    const imgData = canvas.toDataURL("image/png")
+
+    const pdf = new jsPDF("p", "mm", "a4")
+    const pageWidth  = pdf.internal.pageSize.getWidth()
+    const pageHeight = pdf.internal.pageSize.getHeight()
+    const imgWidth  = pageWidth
+    const imgHeight = (canvas.height * imgWidth) / canvas.width
+
+    let heightLeft = imgHeight
+    let position = 0
+
+    pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight)
+    heightLeft -= pageHeight
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight
+      pdf.addPage()
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+    }
+
+    pdf.save("yukim_result.pdf")
+  }
+
+  function handlePrint() {
+    window.print()
+  }
+
   if (result) {
     const { intro, sections } = parseYukimReading(result.reading)
     return (
@@ -138,6 +187,13 @@ export default function Yukim() {
             <div style={{ width:60 }} />
           </div>
           <div style={{ padding:"16px" }}>
+
+            <div style={s.actionRow} className="actionRow">
+              <button onClick={handlePrint} style={{...s.actionBtn, ...s.actionPrint}}>🖨️ 인쇄</button>
+              <button onClick={handleSavePdf} style={{...s.actionBtn, ...s.actionPdf}}>📄 PDF 저장</button>
+            </div>
+
+            <div id="yukim-result-content">
 
             {intro && (
               <div style={s.introBox}>
@@ -161,6 +217,8 @@ export default function Yukim() {
                 <div style={s.readingText}>{result.reading}</div>
               </div>
             )}
+
+            </div>
 
             <button onClick={() => nav("/")} style={{ ...s.btn, marginTop:8 }}>홈으로</button>
           </div>
@@ -256,4 +314,8 @@ const s = {
   resultText:  { fontSize:13, color:"#333", lineHeight:1.9, margin:0, whiteSpace:"pre-wrap" },
   resultBox:   { background:"#f7f7f7", border:"1px solid #e5e5e5", borderRadius:12, padding:"20px 16px", marginBottom:16 },
   readingText: { fontSize:14, color:"#333", lineHeight:2, whiteSpace:"pre-wrap" },
+  actionRow:  { display:"flex", gap:8, marginBottom:12 },
+  actionBtn:  { flex:1, padding:"11px", borderRadius:10, border:"none", fontSize:12.5, fontWeight:500, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 },
+  actionPrint: { background:"#CECBF6", color:"#3C3489" },
+  actionPdf:   { background:"#F4C0D1", color:"#993556" },
 }

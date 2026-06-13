@@ -31,12 +31,14 @@ class ZiweiInput(BaseModel):
     # 특정일 운세 전용
     query_month:  Optional[int] = None
     query_day:    Optional[int] = None
+    calendar:     str = "solar"
+    is_leap:      bool = False
 
 
 def _cache_key(inp: ZiweiInput) -> str:
     qm = inp.query_month or 0
     qd = inp.query_day or 0
-    raw = f"ziwei_{inp.year}_{inp.month}_{inp.day}_{inp.hour}_{inp.minute}_{'M' if inp.is_male else 'F'}_{qm}_{qd}"
+    raw = f"ziwei_{inp.year}_{inp.month}_{inp.day}_{inp.hour}_{inp.minute}_{'M' if inp.is_male else 'F'}_{qm}_{qd}_{inp.calendar}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -60,6 +62,7 @@ async def _call_node(inp: ZiweiInput, current_year: int) -> dict:
         hour=inp.hour, minute=inp.minute, isMale=inp.is_male,
         currentYear=current_year, age=inp.age,
         queryMonth=inp.query_month, queryDay=inp.query_day,
+        calendar=inp.calendar, isLeap=inp.is_leap,
     )
     async with httpx.AsyncClient(timeout=10.0) as c:
         r = await c.post(f"{NODE_URL}/ziwei/calculate", json=payload)

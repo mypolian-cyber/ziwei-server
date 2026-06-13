@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { calcPaid } from '../services/api'
+import html2canvas from 'html2canvas'
+import jsPDF from 'jspdf'
 
 // GPT 결과를 섹션별로 파싱
 function parseReading(text) {
@@ -98,6 +100,40 @@ export default function Result() {
     }
   }
 
+  async function handleSavePdf() {
+    const el = document.getElementById('result-content')
+    if (!el) return
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true })
+    const imgData = canvas.toDataURL('image/png')
+
+    const pdf = new jsPDF('p', 'mm', 'a4')
+    const pageWidth  = pdf.internal.pageSize.getWidth()
+    const pageHeight = pdf.internal.pageSize.getHeight()
+    const imgWidth  = pageWidth
+    const imgHeight = (canvas.height * imgWidth) / canvas.width
+
+    let heightLeft = imgHeight
+    let position = 0
+
+    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+    heightLeft -= pageHeight
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight
+      pdf.addPage()
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+    }
+
+    const today = new Date()
+    const fname = `ziwei_${today.getFullYear()}_${selectedYear}.pdf`
+    pdf.save(fname)
+  }
+
+  function handlePrint() {
+    window.print()
+  }
+
   if (!result) return null
 
   const mb      = result.mingban
@@ -179,6 +215,11 @@ export default function Result() {
           {/* 유료 결과 */}
           {paid && !loading && (
             <>
+              <div style={s.actionRow} className="actionRow">
+                <button onClick={handlePrint} style={{...s.actionBtn, ...s.actionPrint}}>🖨️ 인쇄</button>
+                <button onClick={handleSavePdf} style={{...s.actionBtn, ...s.actionPdf}}>📄 PDF 저장</button>
+              </div>
+              <div id="result-content">
               {/* 섹션별 카드 */}
               {SECTION_CONFIG.filter(sc => sc.key !== '월별 핵심 운세').map(sc => (
                 sections[sc.key] ? (
@@ -214,6 +255,7 @@ export default function Result() {
                 </div>
               )}
 
+              </div>
               <button onClick={() => nav('/')} style={{ ...s.payBtn, marginTop:16, background:'#555' }}>
                 홈으로
               </button>
@@ -312,6 +354,10 @@ const s = {
   paySection: { display:'flex', flexDirection:'column', gap:8, marginBottom:16 },
   yearSelect: { width:'100%', padding:'9px 12px', background:'#f7f7f7', border:'1px solid #e0e0e0', borderRadius:8, fontSize:13, color:'#1a1a1a', outline:'none' },
   payBtn:     { width:'100%', padding:'13px', borderRadius:10, background:'linear-gradient(135deg,#7c3aed,#c026d3)', border:'none', color:'#fff', fontSize:14, fontWeight:500, cursor:'pointer' },
+  actionRow:  { display:'flex', gap:8, marginBottom:12 },
+  actionBtn:  { flex:1, padding:'11px', borderRadius:10, border:'none', fontSize:12.5, fontWeight:500, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6 },
+  actionPrint: { background:'#CECBF6', color:'#3C3489' },
+  actionPdf:   { background:'#F4C0D1', color:'#993556' },
   testBtn:    { width:'100%', padding:'9px', borderRadius:8, background:'#888', border:'none', color:'#fff', fontSize:12, cursor:'pointer' },
   loadingBox: { textAlign:'center', padding:'40px 0' },
   spinner:    { width:32, height:32, border:'3px solid #e5e5e5', borderTopColor:'#7c3aed', borderRadius:'50%', animation:'spin 0.8s linear infinite', margin:'0 auto 14px' },

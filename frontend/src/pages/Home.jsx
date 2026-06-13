@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import axios from 'axios'
 import { createOrder, calcTest } from '../services/api'
 
 const HOURS = [
@@ -9,17 +10,38 @@ const HOURS = [
 ]
 
 const LINKS = [
-  { icon:'🌡️', name:'히트맵',     sub:'데이터 시각화',      url:'https://heatmap.adelante-properties.com' },
-  { icon:'▶️', name:'YPP 도전자', sub:'유튜브 수익화 모임', url:'https://cafe.naver.com/brownn3b6d' },
+  { icon:'🌡️', name:'히트맵',     sub:'데이터 시각화',      url:'https://heatmap.adelante-properties.com', bg:'#FAC775', color:'#854F0B' },
+  { icon:'▶️', name:'YPP 도전자', sub:'유튜브 수익화 모임', url:'https://cafe.naver.com/brownn3b6d', bg:'#F7C1C1', color:'#A32D2D' },
 ]
 
 export default function Home() {
   const nav = useNavigate()
-  const [form, setForm] = useState({ year:'', month:'', day:'', hour:'', is_male:'' })
+  const [form, setForm] = useState({ year:'', month:'', day:'', hour:'', is_male:'', calendar:'solar', is_leap:false })
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(null)
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [dday, setDday] = useState('')
+  const [loadingMsg, setLoadingMsg] = useState(0)
+
+  const LOADING_MESSAGES = [
+    '사주를 분석하고 있어요',
+    '명반을 그리는 중이에요',
+    '운세를 정리하고 있어요',
+    '거의 다 됐어요',
+  ]
+
+  useEffect(() => {
+    if (!loading) return
+    const interval = setInterval(() => {
+      setLoadingMsg(prev => (prev + 1) % LOADING_MESSAGES.length)
+    }, 1800)
+    return () => clearInterval(interval)
+  }, [loading])
+  const [betaMode, setBetaMode] = useState(false)
+
+  useEffect(() => {
+    axios.get('/api/config').then(({data}) => setBetaMode(data.beta_mode)).catch(()=>{})
+  }, [])
 
   useEffect(() => {
     function calc() {
@@ -54,6 +76,8 @@ export default function Home() {
       is_male: form.is_male === 'true',
       current_year: selectedYear,
       age: today.getFullYear() - Number(form.year),
+      calendar: form.calendar,
+      is_leap: form.is_leap,
     }
   }
 
@@ -64,6 +88,19 @@ export default function Home() {
     setLoading(serviceType)
     try {
       const input = buildInput()
+
+      if (betaMode) {
+        // 베타: 결제 없이 바로 결과
+        const result = await calcTest(input, serviceType)
+        sessionStorage.setItem('ziwei_result', JSON.stringify(result))
+        sessionStorage.setItem('ziwei_input', JSON.stringify(input))
+        sessionStorage.setItem('payment_key', 'test_skip')
+        sessionStorage.setItem('cache_key', result.cache_key)
+        sessionStorage.setItem('pending_service', serviceType)
+        nav('/result')
+        return
+      }
+
       const cacheRes = await calcTest(input, 'ziwei_free')
       const order = await createOrder(serviceType, cacheRes.cache_key)
       sessionStorage.setItem('ziwei_input', JSON.stringify(input))
@@ -138,7 +175,21 @@ export default function Home() {
         </div>
 
         <div style={s.section}>
-          <div style={s.sectionLabel}>📅 생년월일 (양력)</div>
+          <div style={s.sectionLabel}>📅 생년월일</div>
+          <div style={s.calRow}>
+            <button onClick={() => set('calendar','solar')}
+              style={{ ...s.calBtn, ...(form.calendar==='solar' ? s.calBtnOn : {}) }}>양력</button>
+            <button onClick={() => set('calendar','lunar')}
+              style={{ ...s.calBtn, ...(form.calendar==='lunar' ? s.calBtnOn : {}) }}>음력</button>
+            {form.calendar === 'lunar' && (
+              <label style={s.leapLabel}>
+                <input type="checkbox" checked={form.is_leap}
+                  onChange={e => set('is_leap', e.target.checked)}
+                  style={{ marginRight:4 }} />
+                윤달
+              </label>
+            )}
+          </div>
           <div style={s.row3}>
             <input type="number" placeholder="출생 연도" value={form.year}
               onChange={e => set('year', e.target.value)} style={s.input} />
@@ -166,7 +217,7 @@ export default function Home() {
               여성 ♀
             </button>
             <button onClick={() => set('is_male','true')}
-              style={{ ...s.genderBtn, ...(form.is_male==='true' ? s.genderBtnOn : {}) }}>
+              style={{ ...s.genderBtn, ...(form.is_male==='true' ? s.genderBtnOnMale : {}) }}>
               남성 ♂
             </button>
           </div>
@@ -224,7 +275,7 @@ export default function Home() {
         <div style={s.linkGrid}>
           {LINKS.map(l => (
             <a key={l.name} href={l.url} target="_blank" rel="noreferrer" style={s.linkItem}>
-              <div style={s.linkIcon}>{l.icon}</div>
+              <div style={{ ...s.linkIcon, background:l.bg, color:l.color }}>{l.icon}</div>
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={s.linkName}>{l.name}</div>
                 <div style={s.linkSub}>{l.sub}</div>
@@ -238,6 +289,14 @@ export default function Home() {
           Adelante Inc. · info@adelante-properties.com<br/>
           <a href="/privacy" style={{ color:'#999', textDecoration:'underline' }}>개인정보처리방침 · 이용약관 · 사업자정보</a>
         </div>
+
+        {loading && (
+          <div style={s.loadingOverlay}>
+            <div style={s.orb}><div style={s.orbRing} /></div>
+            <div style={s.loadingTitle}>하늘의 기운을 읽는 중...</div>
+            <div style={s.loadingSub}>{LOADING_MESSAGES[loadingMsg]}</div>
+          </div>
+        )}
 
       </div>
     </div>
@@ -275,11 +334,16 @@ const s = {
   sectionLabel: { fontSize:11.5, fontWeight:500, color:'#1a1a1a', marginBottom:6, display:'flex', alignItems:'center', gap:5 },
   req: { fontSize:8.5, color:'#993556', fontWeight:500, background:'#FBEAF0', padding:'1px 6px', borderRadius:6, marginLeft:2 },
 
+  calRow: { display:'flex', gap:6, marginBottom:6, alignItems:'center' },
+  calBtn: { padding:'5px 14px', borderRadius:8, fontSize:11.5, border:'1px solid #e0e0e0', background:'#f7f7f7', color:'#666', cursor:'pointer' },
+  calBtnOn: { border:'1.5px solid #d4537e', background:'#FBEAF0', color:'#993556', fontWeight:500 },
+  leapLabel: { fontSize:11, color:'#666', display:'flex', alignItems:'center', marginLeft:4 },
   row3: { display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:5, marginBottom:8 },
   row2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:5 },
   input: { width:'100%', padding:'8px 9px', background:'#f7f7f7', border:'1px solid #e0e0e0', borderRadius:8, fontSize:12.5, color:'#1a1a1a', outline:'none' },
   genderBtn: { padding:8, borderRadius:8, fontSize:13, textAlign:'center', border:'1px solid #e0e0e0', background:'#f7f7f7', color:'#666', cursor:'pointer' },
   genderBtnOn: { border:'1.5px solid #d4537e', background:'#FBEAF0', color:'#993556', fontWeight:500 },
+  genderBtnOnMale: { border:'1.5px solid #378ADD', background:'#E6F1FB', color:'#0C447C', fontWeight:500 },
 
   divider: { height:7, background:'#f0f0f0', marginTop:10 },
 
@@ -287,7 +351,7 @@ const s = {
   svcSectionLabel: { fontSize:11.5, fontWeight:500, color:'#1a1a1a', marginBottom:8, display:'flex', alignItems:'center', gap:5 },
   svcRow: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:7 },
 
-  svcCard: { background:'#fff', border:'1px solid #e5e5e5', borderRadius:14, padding:'11px 9px', display:'flex', flexDirection:'column' },
+  svcCard: { background:'#fff', border:'1.5px solid #378ADD', borderRadius:14, padding:'11px 9px', display:'flex', flexDirection:'column' },
   svcCardFeatured: { background:'#fff', border:'1.5px solid #d4537e', borderRadius:14, padding:'11px 9px', display:'flex', flexDirection:'column', position:'relative' },
   featuredBadge: { position:'absolute', top:-8, right:10, background:'#d4537e', color:'#fff', fontSize:9, fontWeight:500, padding:'2px 8px', borderRadius:8 },
 
@@ -299,8 +363,8 @@ const s = {
   svcPrice: { fontSize:15, fontWeight:500, color:'#1a1a1a', marginBottom:6 },
   unit: { fontSize:10, color:'#888', fontWeight:400 },
 
-  ctaBtn: { width:'100%', padding:'9px', borderRadius:8, background:'linear-gradient(135deg,#d4537e,#7c3aed)', border:'none', color:'#fff', fontSize:11.5, fontWeight:500, cursor:'pointer' },
-  ctaBtnOutline: { width:'100%', padding:'9px', borderRadius:8, background:'#fff', border:'1px solid #d4537e', color:'#993556', fontSize:11.5, fontWeight:500, cursor:'pointer' },
+  ctaBtn: { width:'100%', padding:'9px', borderRadius:8, background:'#F4C0D1', border:'none', color:'#993556', fontSize:11.5, fontWeight:500, cursor:'pointer' },
+  ctaBtnOutline: { width:'100%', padding:'9px', borderRadius:8, background:'#B5D4F4', border:'none', color:'#185FA5', fontSize:11.5, fontWeight:500, cursor:'pointer' },
   testBtn: { width:'100%', padding:'6px', borderRadius:8, background:'#999', border:'none', color:'#fff', fontSize:9.5, marginTop:4, cursor:'pointer' },
 
   errBox: { fontSize:11, color:'#a32d2d', background:'rgba(226,75,74,0.06)', border:'1px solid rgba(226,75,74,0.2)', borderRadius:8, padding:'7px 11px', marginBottom:8 },
@@ -313,10 +377,31 @@ const s = {
 
   linkGrid: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, padding:'10px 14px' },
   linkItem: { background:'#fff', border:'1px solid #e5e5e5', borderRadius:10, padding:9, display:'flex', alignItems:'center', gap:7, textDecoration:'none' },
-  linkIcon: { width:26, height:26, borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, flexShrink:0, background:'#f7f7f7' },
+  linkIcon: { width:26, height:26, borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, flexShrink:0 },
   linkName: { fontSize:10.5, fontWeight:500, color:'#1a1a1a' },
   linkSub: { fontSize:9, color:'#999' },
   linkArrow: { color:'#bbb', fontSize:13, flexShrink:0 },
 
   footer: { textAlign:'center', padding:'0 14px 16px', fontSize:9, color:'#bbb', lineHeight:1.5 },
+
+  loadingOverlay: {
+    position:'fixed', inset:0, zIndex:200,
+    background:'rgba(255,255,255,0.92)',
+    display:'flex', flexDirection:'column',
+    alignItems:'center', justifyContent:'center',
+    textAlign:'center',
+  },
+  orb: {
+    width:64, height:64, borderRadius:'50%',
+    background:'radial-gradient(circle at 35% 35%, #f3dca6, #d4537e 55%, #7c3aed 100%)',
+    marginBottom:16, position:'relative',
+    animation:'pulseOrb 1.6s ease-in-out infinite',
+  },
+  orbRing: {
+    position:'absolute', inset:-8, borderRadius:'50%',
+    border:'2px solid rgba(212,83,126,0.3)',
+    animation:'ringPulse 1.6s ease-out infinite',
+  },
+  loadingTitle: { fontSize:14, fontWeight:500, color:'#1a1a1a', marginBottom:4 },
+  loadingSub: { fontSize:11.5, color:'#999' },
 }

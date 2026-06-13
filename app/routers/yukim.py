@@ -28,7 +28,7 @@ class YukimRequest(BaseModel):
 @router.post("/calculate")
 async def calculate(req: YukimRequest):
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(
                 f"{FORTUNE_URL}/api/yukim/calculate",
                 json=req.model_dump(exclude={'payment_key'}),
