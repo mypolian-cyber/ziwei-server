@@ -28,7 +28,6 @@ function parseYukimReading(text) {
   const keys = SECTION_CONFIG.map(s => s.key)
   const firstIdx = text.indexOf(keys[0])
   const intro = firstIdx > -1 ? text.slice(0, firstIdx).trim() : ""
-
   const sections = {}
   for (let i = 0; i < keys.length; i++) {
     const start = text.indexOf(keys[i])
@@ -44,12 +43,15 @@ function parseYukimReading(text) {
   return { intro, sections }
 }
 
-function loadToss(clientKey) {
+const STORE_ID = 'store-659090d9-bacb-4fbd-9de9-b4fc74e8fcaa'
+const CHANNEL_KEY_CARD = import.meta.env.VITE_PORTONE_CHANNEL_KEY_CARD || ''
+
+function loadPortOne() {
   return new Promise((resolve, reject) => {
-    if (window.TossPayments) return resolve(window.TossPayments(clientKey))
+    if (window.PortOne) return resolve(window.PortOne)
     const script = document.createElement("script")
-    script.src = "https://js.tosspayments.com/v1/payment"
-    script.onload = () => resolve(window.TossPayments(clientKey))
+    script.src = "https://cdn.portone.io/v2/browser-sdk.js"
+    script.onload = () => resolve(window.PortOne)
     script.onerror = reject
     document.head.appendChild(script)
   })
@@ -63,34 +65,16 @@ export default function Yukim() {
   const [loading,       setLoading]       = useState(false)
   const [error,         setError]         = useState("")
   const [result,        setResult]        = useState(null)
-
-  const [betaMode, setBetaMode] = useState(false)
+  const [betaMode,      setBetaMode]      = useState(false)
 
   React.useEffect(() => {
     axios.get("/api/config").then(({data}) => setBetaMode(data.beta_mode)).catch(()=>{})
   }, [])
+
   const input = JSON.parse(sessionStorage.getItem("ziwei_input") || "{}")
 
-  React.useEffect(() => {
-    const payKey  = sessionStorage.getItem("yukim_payment_key")
-    const pending = sessionStorage.getItem("yukim_pending")
-    const q       = sessionStorage.getItem("yukim_question")
-    if (payKey && pending && q) {
-      sessionStorage.removeItem("yukim_payment_key")
-      sessionStorage.removeItem("yukim_pending")
-      sessionStorage.removeItem("yukim_question")
-      setLoading(true)
-      axios.post("/api/yukim/calculate", { ...JSON.parse(q), payment_key: payKey })
-        .then(({ data }) => setResult(data))
-        .catch(() => setError("오류가 발생했습니다. 다시 시도해주세요."))
-        .finally(() => setLoading(false))
-    }
-  }, [])
-
   function toggleItem(item) {
-    setSelectedItems(prev =>
-      prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item]
-    )
+    setSelectedItems(prev => prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item])
   }
 
   function buildQuestion() {
@@ -113,7 +97,6 @@ export default function Yukim() {
     setLoading(true)
     try {
       if (betaMode) {
-        // 베타: 결제 없이 바로 GPT 호출
         const { data } = await axios.post("/api/yukim/calculate", {
           ...buildQuestion(), payment_key: "test_skip"
         })
@@ -122,24 +105,46 @@ export default function Yukim() {
         return
       }
 
-      // 1) 결제 주문 생성
       const { data: order } = await axios.post("/api/payment/order", {
         service_type: "yukim", cache_key: ""
       })
 
-      // 2) 질문 내용을 세션에 저장 (결제 후 복귀시 사용)
-      sessionStorage.setItem("yukim_question", JSON.stringify(buildQuestion()))
-      sessionStorage.setItem("yukim_pending", "1")
-
-      // 3) 토스 결제 호출
-      const toss = await loadToss(order.client_key)
-      await toss.requestPayment("카드", {
-        amount: order.amount, orderId: order.order_id,
+      const PortOne = await loadPortOne()
+      const response = await PortOne.requestPayment({
+        storeId: STORE_ID,
+        channelKey: CHANNEL_KEY_CARD,
+        paymentId: order.merchant_uid,
         orderName: order.order_name,
-        successUrl: order.success_url, failUrl: order.fail_url,
+        totalAmount: order.amount,
+        currency: 'CURRENCY_KRW',
+        payMethod: 'CARD',
+        customer: {
+          fullName: '고객',
+          phoneNumber: '010-0000-0000',
+          email: 'customer@ziwei.com',
+        },
       })
+
+      if (!response || response.code) {
+        setError(response?.message || "결제가 취소되었습니다.")
+        setLoading(false)
+        return
+      }
+
+      const { data: confirmed } = await axios.post("/api/payment/confirm", {
+        payment_id: response.paymentId,
+        service_type: "yukim",
+        cache_key: "",
+      })
+
+      const { data } = await axios.post("/api/yukim/calculate", {
+        ...buildQuestion(), payment_key: confirmed.payment_key
+      })
+      setResult(data)
+
     } catch(e) {
       setError("오류가 발생했습니다: " + (e.message || "다시 시도해주세요."))
+    } finally {
       setLoading(false)
     }
   }
@@ -149,142 +154,101 @@ export default function Yukim() {
     if (!el) return
     const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true })
     const imgData = canvas.toDataURL("image/png")
-
     const pdf = new jsPDF("p", "mm", "a4")
-    const pageWidth  = pdf.internal.pageSize.getWidth()
+    const pageWidth = pdf.internal.pageSize.getWidth()
     const pageHeight = pdf.internal.pageSize.getHeight()
-    const imgWidth  = pageWidth
+    const imgWidth = pageWidth
     const imgHeight = (canvas.height * imgWidth) / canvas.width
-
-    let heightLeft = imgHeight
-    let position = 0
-
+    let heightLeft = imgHeight, position = 0
     pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight)
     heightLeft -= pageHeight
-
     while (heightLeft > 0) {
       position = heightLeft - imgHeight
       pdf.addPage()
       pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight)
       heightLeft -= pageHeight
     }
-
     pdf.save("yukim_result.pdf")
   }
 
-  function handlePrint() {
-    window.print()
-  }
+  function handlePrint() { window.print() }
 
   if (result) {
     const { intro, sections } = parseYukimReading(result.reading)
     return (
-      <div style={s.page}>
-        <div style={s.card}>
-          <div style={s.bar}>
-            <button onClick={() => setResult(null)} style={s.backBtn}>← 다시 묻기</button>
-            <span style={s.barTitle}>간절한 소망 하늘의 뜻은</span>
-            <div style={{ width:60 }} />
-          </div>
-          <div style={{ padding:"16px" }}>
-
-            <div style={s.actionRow} className="actionRow">
-              <button onClick={handlePrint} style={{...s.actionBtn, ...s.actionPrint}}>🖨️ 인쇄</button>
-              <button onClick={handleSavePdf} style={{...s.actionBtn, ...s.actionPdf}}>📄 PDF 저장</button>
-            </div>
-
-            <div id="yukim-result-content">
-
-            {intro && (
-              <div style={s.introBox}>
-                <p style={s.introText}>{intro}</p>
-              </div>
-            )}
-
-            {SECTION_CONFIG.map(sc => (
-              sections[sc.key] ? (
-                <div key={sc.key} style={{ ...s.resultSection, background: sc.bg, borderColor: sc.border }}>
-                  <div style={{ ...s.resultSectionTitle, color: sc.color }}>
-                    {sc.icon} {sc.title}
-                  </div>
-                  <p style={s.resultText}>{sections[sc.key]}</p>
-                </div>
-              ) : null
-            ))}
-
-            {Object.keys(sections).length === 0 && (
-              <div style={s.resultBox}>
-                <div style={s.readingText}>{result.reading}</div>
-              </div>
-            )}
-
-            </div>
-
-            <button onClick={() => nav("/")} style={{ ...s.btn, marginTop:8 }}>홈으로</button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div style={s.page}>
-      <div style={s.card}>
+      <div style={s.page}><div style={s.card}>
         <div style={s.bar}>
-          <button onClick={() => nav(-1)} style={s.backBtn}>← 뒤로</button>
+          <button onClick={() => setResult(null)} style={s.backBtn}>← 다시 묻기</button>
           <span style={s.barTitle}>간절한 소망 하늘의 뜻은</span>
           <div style={{ width:60 }} />
         </div>
         <div style={{ padding:"16px" }}>
-          <p style={s.desc}>간절히 바라는 일, 하늘의 뜻을 물어보세요</p>
+          <div style={s.actionRow} className="actionRow">
+            <button onClick={handlePrint} style={{...s.actionBtn, ...s.actionPrint}}>🖨️ 인쇄</button>
+            <button onClick={handleSavePdf} style={{...s.actionBtn, ...s.actionPdf}}>📄 PDF 저장</button>
+          </div>
+          <div id="yukim-result-content">
+            {intro && <div style={s.introBox}><p style={s.introText}>{intro}</p></div>}
+            {SECTION_CONFIG.map(sc => sections[sc.key] ? (
+              <div key={sc.key} style={{ ...s.resultSection, background: sc.bg, borderColor: sc.border }}>
+                <div style={{ ...s.resultSectionTitle, color: sc.color }}>{sc.icon} {sc.title}</div>
+                <p style={s.resultText}>{sections[sc.key]}</p>
+              </div>
+            ) : null)}
+            {Object.keys(sections).length === 0 && (
+              <div style={s.resultBox}><div style={s.readingText}>{result.reading}</div></div>
+            )}
+          </div>
+          <button onClick={() => nav("/")} style={{ ...s.btn, marginTop:8 }}>홈으로</button>
+        </div>
+      </div></div>
+    )
+  }
 
-          <div style={s.sectionLabel}>어떤 일이 궁금하세요?</div>
-          <div style={s.typeGrid}>
-            {QUESTION_TYPES.map(q => (
-              <button key={q.type}
-                onClick={() => { setSelectedType(q.type); setSelectedItems([]) }}
-                style={{ ...s.typeBtn, ...(selectedType===q.type ? s.typeBtnOn : {}) }}>
-                <div style={{ fontSize:20, marginBottom:4 }}>{q.emoji}</div>
-                <div style={{ fontSize:12, fontWeight:500 }}>{q.type}</div>
+  return (
+    <div style={s.page}><div style={s.card}>
+      <div style={s.bar}>
+        <button onClick={() => nav(-1)} style={s.backBtn}>← 뒤로</button>
+        <span style={s.barTitle}>간절한 소망 하늘의 뜻은</span>
+        <div style={{ width:60 }} />
+      </div>
+      <div style={{ padding:"16px" }}>
+        <p style={s.desc}>간절히 바라는 일, 하늘의 뜻을 물어보세요</p>
+        <div style={s.sectionLabel}>어떤 일이 궁금하세요?</div>
+        <div style={s.typeGrid}>
+          {QUESTION_TYPES.map(q => (
+            <button key={q.type} onClick={() => { setSelectedType(q.type); setSelectedItems([]) }}
+              style={{ ...s.typeBtn, ...(selectedType===q.type ? s.typeBtnOn : {}) }}>
+              <div style={{ fontSize:20, marginBottom:4 }}>{q.emoji}</div>
+              <div style={{ fontSize:12, fontWeight:500 }}>{q.type}</div>
+            </button>
+          ))}
+        </div>
+        {selectedType && (<>
+          <div style={s.sectionLabel}>세부 항목 선택</div>
+          <div style={s.itemWrap}>
+            {QUESTION_TYPES.find(q => q.type===selectedType)?.items.map(item => (
+              <button key={item} onClick={() => toggleItem(item)}
+                style={{ ...s.itemBtn, ...(selectedItems.includes(item) ? s.itemBtnOn : {}) }}>
+                {item}
               </button>
             ))}
           </div>
-
-          {selectedType && (
-            <>
-              <div style={s.sectionLabel}>세부 항목 선택</div>
-              <div style={s.itemWrap}>
-                {QUESTION_TYPES.find(q => q.type===selectedType)?.items.map(item => (
-                  <button key={item} onClick={() => toggleItem(item)}
-                    style={{ ...s.itemBtn, ...(selectedItems.includes(item) ? s.itemBtnOn : {}) }}>
-                    {item}
-                  </button>
-                ))}
-              </div>
-              <div style={s.sectionLabel}>더 구체적으로 (선택사항)</div>
-              <input type="text"
-                placeholder="예: 이번 면접에서 합격할 수 있을까요?"
-                value={questionText}
-                onChange={e => setQuestionText(e.target.value)}
-                style={s.input} />
-            </>
-          )}
-
-          {error && <div style={s.errBox}>{error}</div>}
-
-          {loading ? (
-            <div style={s.loadingBox}>
-              <div style={s.spinner} />
-              <p style={{ color:"#666", fontSize:14 }}>결제창으로 이동 중...</p>
-            </div>
-          ) : (
-            <button onClick={handleAsk} style={s.btn}>
-              🔮 1,990원 결제하고 하늘에 묻기
-            </button>
-          )}
-        </div>
+          <div style={s.sectionLabel}>더 구체적으로 (선택사항)</div>
+          <input type="text" placeholder="예: 이번 면접에서 합격할 수 있을까요?"
+            value={questionText} onChange={e => setQuestionText(e.target.value)} style={s.input} />
+        </>)}
+        {error && <div style={s.errBox}>{error}</div>}
+        {loading ? (
+          <div style={s.loadingBox}>
+            <div style={s.spinner} />
+            <p style={{ color:"#666", fontSize:14 }}>결제 처리 중...</p>
+          </div>
+        ) : (
+          <button onClick={handleAsk} style={s.btn}>🔮 1,990원 결제하고 하늘에 묻기</button>
+        )}
       </div>
-    </div>
+    </div></div>
   )
 }
 
@@ -314,8 +278,8 @@ const s = {
   resultText:  { fontSize:13, color:"#333", lineHeight:1.9, margin:0, whiteSpace:"pre-wrap" },
   resultBox:   { background:"#f7f7f7", border:"1px solid #e5e5e5", borderRadius:12, padding:"20px 16px", marginBottom:16 },
   readingText: { fontSize:14, color:"#333", lineHeight:2, whiteSpace:"pre-wrap" },
-  actionRow:  { display:"flex", gap:8, marginBottom:12 },
-  actionBtn:  { flex:1, padding:"11px", borderRadius:10, border:"none", fontSize:12.5, fontWeight:500, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 },
+  actionRow:   { display:"flex", gap:8, marginBottom:12 },
+  actionBtn:   { flex:1, padding:"11px", borderRadius:10, border:"none", fontSize:12.5, fontWeight:500, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 },
   actionPrint: { background:"#CECBF6", color:"#3C3489" },
   actionPdf:   { background:"#F4C0D1", color:"#993556" },
 }
