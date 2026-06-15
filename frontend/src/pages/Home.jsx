@@ -161,7 +161,20 @@ export default function Home() {
     <div style={s.page}><div style={s.card}>
       <div style={s.bar}>
         <span style={s.barTitle}>紫微斗數 예언소</span>
-        <button onClick={() => nav('/contact')} style={s.barBtn}>✉ 문의하기</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button onClick={async () => {
+            const url = 'https://ziwei.adelante-properties.com';
+            const title = '자미두수 예언소 — 확실한 운세';
+            const text = '애매한 운세는 없다. 확실한 답만 드립니다.';
+            if (navigator.share) {
+              try { await navigator.share({ title, text, url }); } catch(e) {}
+            } else {
+              await navigator.clipboard.writeText(url);
+              alert('링크가 복사됐습니다!');
+            }
+          }} style={s.barBtn}>🔗 공유</button>
+          <button onClick={() => nav('/contact')} style={s.barBtn}>✉ 문의하기</button>
+        </div>
       </div>
       <div style={s.hero}>
         <div style={s.heroRow}>

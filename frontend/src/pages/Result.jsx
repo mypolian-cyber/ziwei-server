@@ -218,6 +218,17 @@ export default function Result() {
               <div style={s.actionRow} className="actionRow">
                 <button onClick={handlePrint} style={{...s.actionBtn, ...s.actionPrint}}>🖨️ 인쇄</button>
                 <button onClick={handleSavePdf} style={{...s.actionBtn, ...s.actionPdf}}>📄 PDF 저장</button>
+                <button onClick={async () => {
+                  const url = 'https://ziwei.adelante-properties.com';
+                  const title = '자미두수 — 확실한 운세';
+                  const text = '애매한 운세는 없다. 확실한 답만 드립니다.';
+                  if (navigator.share) {
+                    try { await navigator.share({ title, text, url }); } catch(e) {}
+                  } else {
+                    await navigator.clipboard.writeText(url);
+                    alert('링크가 복사됐습니다!');
+                  }
+                }} style={{...s.actionBtn, background:'rgba(236,72,153,0.1)', border:'1px solid rgba(236,72,153,0.4)', color:'rgba(255,255,255,0.85)'}}>🔗 공유</button>
               </div>
               <div id="result-content">
               {/* 섹션별 카드 */}
