@@ -266,6 +266,7 @@ export default function Home() {
       <div style={s.footer}>
         Adelante Inc. · info@adelante-properties.com<br/>
         아델란테주식회사 · 대표 이경은 · 사업자등록번호 219-88-01348 · 070-8064-2663<br/>
+        서울특별시 성동구 왕십리로 326, 604호<br/>
         <a href="/privacy" style={{ color:'#999', textDecoration:'underline' }}>개인정보처리방침 · 이용약관 및 환불정책 · 사업자정보</a>
       </div>
       {loading && (

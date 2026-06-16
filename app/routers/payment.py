@@ -68,6 +68,20 @@ async def confirm(req: ConfirmReq):
 
     merchant_uid = payment.get("merchantPaymentId", "")
 
+    # 카드정보 추출
+    pay_method_data = payment.get("method", {})
+    card_company = ""
+    card_last4   = ""
+    pay_method_str = "CARD"
+    if "card" in pay_method_data:
+        card_info    = pay_method_data.get("card", {})
+        card_company = card_info.get("issuer", {}).get("name", "")
+        card_num     = card_info.get("number", "")
+        card_last4   = card_num[-4:] if card_num else ""
+        pay_method_str = "CARD"
+    elif "easyPay" in pay_method_data:
+        pay_method_str = pay_method_data.get("easyPay", {}).get("provider", "EASYPAY")
+
     db = SessionLocal()
     try:
         pay = db.query(ZiweiPayment).filter(ZiweiPayment.order_id == merchant_uid).first()
@@ -81,5 +95,32 @@ async def confirm(req: ConfirmReq):
             cache_key = req.cache_key
     finally:
         db.close()
+
+    # unified_payments 저장 (fortune DB)
+    import psycopg2, os
+    from datetime import datetime as dt
+    try:
+        conn = psycopg2.connect(os.getenv(
+            "FORTUNE_DB_URL",
+            "postgresql://fortune_user:fortune_pass_2026@localhost:5432/fortune"
+        ))
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO unified_payments
+            (service, service_type, order_id, payment_key,
+             pay_method, card_company, card_last4,
+             amount, status, paid_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (order_id) DO NOTHING
+        """, (
+            "ziwei", req.service_type, merchant_uid, req.payment_id,
+            pay_method_str, card_company, card_last4,
+            paid_amount, "completed", dt.utcnow()
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"unified_payments 저장 오류: {e}")
 
     return {"status": "completed", "payment_key": req.payment_id, "cache_key": cache_key}
