@@ -5,6 +5,7 @@ import Result from './pages/Result'
 import Contact from './pages/Contact'
 import Yukim from './pages/Yukim'
 import Privacy from './pages/Privacy'
+import PaymentRedirect from './pages/PaymentRedirect'
 
 export default function App() {
   return (
